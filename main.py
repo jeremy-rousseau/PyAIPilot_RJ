@@ -6,6 +6,22 @@ import time
 
 from setup import setup_components
 
+
+##############
+import logging
+# Configuration du fichier de log
+logging.basicConfig(
+    filename='flight_log.txt',
+    filemode='w',  # 'w' pour écraser le fichier à chaque nouveau lancement
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S',
+    level=logging.INFO
+)
+
+logger = logging.getLogger("DronePilot")
+logger.info("--- DÉMARRAGE DU LOG DE VOL ---")
+##############
+
 # Modify these properties if you want to run the server remotely for example
 SIM_SERVER_UDP_IP = "127.0.0.1"
 SIM_SERVER_UDP_PORT = 14550

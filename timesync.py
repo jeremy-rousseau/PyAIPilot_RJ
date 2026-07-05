@@ -18,7 +18,10 @@ class TimeSync:
         ts = cls(mavlink_connection, data)
         ts.thread = threading.Thread(
             target=ts.timesync_loop,
-            daemon = False
+            daemon = True
+            #Pour éviter problème, lors de la fin du process
+            # daemon = False
+            
         )
         ts.is_running = True
         ts.thread.start()

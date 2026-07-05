@@ -2,6 +2,9 @@ import time
 
 from pymavlink import mavutil
 
+import logging
+logger = logging.getLogger("DronePilot")
+
 # --------------------------------------------------------------------------------------
 # RESET COMMAND
 MAVLINK_CMD_SIM_RESET = 31000
@@ -31,13 +34,16 @@ def update_motor_control(mavlink_conn, system_boot_ms):
 PITCH_RATE = -0.3   # rad/s (negative = pitch forward)
 ROLL_RATE  = 0.0
 YAW_RATE   = 0.0
-THRUST     = 0.6    # 0.0 - 1.0
+THRUST     = 0.5    # 0.0 - 1.0
+
+GAIN_YAW = 0.1      # Sensibilité pour tourner à gauche/droite
+GAIN_PITCH = 0.08    # Sensibilité pour monter/descendre
 
 RATES_ATTITUDE_MASK = (
     mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE
 )
 
-def update_attitude_flight_control(mavlink_conn, system_boot_ms):
+def update_attitude_flight_control(mavlink_conn, system_boot_ms, shared_data):
     now_ms = int(time.time() * 1000)
 
     """
@@ -54,17 +60,59 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms):
     body_yaw_rate             : Body yaw rate [rad/s] (type:float)
     thrust                    : Collective thrust, normalized to 0 .. 1 (-1 .. 1 for vehicles capable of reverse trust) (type:float)
     """
-    mavlink_conn.mav.set_attitude_target_send(
-        now_ms - system_boot_ms,
-        mavlink_conn.target_system,
-        mavlink_conn.target_component,
-        RATES_ATTITUDE_MASK,
-        [1, 0, 0, 0],  # dummy quaternion (ignored)
-        ROLL_RATE,
-        PITCH_RATE,
-        YAW_RATE,
-        THRUST
-    )
+
+    # Si la vision détecte un portail orange
+    if shared_data.get('gate_visible'):
+
+        #Récupération des données
+        gate_x = shared_data.get('gate_x')
+        gate_y = shared_data.get('gate_y')
+        gate_size = shared_data.get('gate_size')
+
+        # 1. Orientation (Lacet / Yaw)
+        # EXEMPLE : si le portail est à droite (gate_x > 0), on tourne à droite
+        yaw_rate_to_gate = gate_x * GAIN_YAW
+
+        # 2. Hauteur (Tangage / Pitch) : Si le portail est plus haut que le centre (gate_y < 0)
+        # Note : En MAVLink, un pitch_rate négatif fait pencher le drone vers l'avant (pour avancer).
+        # Ici, on utilise le pitch pour monter/descendre ou ajuster notre approche.
+        # On garde PITCH_RATE (-0.3) pour avancer, et on ajoute/soustrait pour monter ou descendre.
+        # Si gate_y < 0 (porte haute), "- gate_y" devient positif -> le drone se redresse un peu pour monter.
+        pitch_rate_to_gate = PITCH_RATE - (gate_y * GAIN_PITCH)
+
+
+        # 3. Vitesse / Poussée (Thrust) : 
+        # Si le portail est loin (gate_size est petit), on maintient la poussée.
+        # Plus on approche (gate_size grandit), plus on pourrait stabiliser.
+        thrust_to_gate = THRUST
+
+        mavlink_conn.mav.set_attitude_target_send(
+            now_ms - system_boot_ms,
+            mavlink_conn.target_system,
+            mavlink_conn.target_component,
+            RATES_ATTITUDE_MASK,
+            [1, 0, 0, 0],  # dummy quaternion (ignored)
+            ROLL_RATE,
+            pitch_rate_to_gate,
+            yaw_rate_to_gate,
+            thrust_to_gate
+        )
+        logger.info(f"[PILOTE] CIBLE VISIBLE -> Ordres envoyés : Pitch={pitch_rate_to_gate:.2f} | Yaw={yaw_rate_to_gate:.2f} | Thrust={thrust_to_gate:.2f}")
+
+    else:
+        # Mode recherche / avancement par défaut si aucun portail visible
+        mavlink_conn.mav.set_attitude_target_send(
+            now_ms - system_boot_ms,
+            mavlink_conn.target_system,
+            mavlink_conn.target_component,
+            RATES_ATTITUDE_MASK,
+            [1, 0, 0, 0],  # dummy quaternion (ignored)
+            ROLL_RATE,
+            PITCH_RATE,
+            YAW_RATE,
+            THRUST
+        )
+        logger.info(f"[PILOTE] MODE RECHERCHE -> Ordres par défaut : Pitch={PITCH_RATE:.2f} | Yaw={YAW_RATE:.2f} | Thrust={THRUST:.2f}")
 
 # --------------------------------------------------------------------------------------
 # POSITION CONTROLS
@@ -134,7 +182,7 @@ class Controller:
 
     def update(self):
         # send automated targets to sim flight controller
-        #update_attitude_flight_control(self.sim_conn, self.system_boot_ms)
+        update_attitude_flight_control(self.sim_conn, self.system_boot_ms,self.data)
         # alternatively one of
         # update_position_flight_control(self.sim_conn, self.system_boot_ms)
         update_motor_control(self.sim_conn, self.system_boot_ms)
