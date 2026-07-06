@@ -9,11 +9,15 @@ from setup import setup_components
 
 ##############
 import logging
+import os
 # Configuration du fichier de log
+os.makedirs('log', exist_ok=True)
+
 logging.basicConfig(
-    filename='flight_log.txt',
+    filename='log/flight_log.txt',
     filemode='w',  # 'w' pour écraser le fichier à chaque nouveau lancement
     format='%(asctime)s [%(levelname)s] %(message)s',
+    encoding='utf8',
     datefmt='%H:%M:%S',
     level=logging.INFO
 )

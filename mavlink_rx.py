@@ -260,6 +260,21 @@ class MAVLinkRX:
         motor_back_left = msg.actuator[2]
         motor_back_right = msg.actuator[3]
 
+        # --- ON ENVOIE LES DONNÉES DANS LA MÉMOIRE PARTAGÉE ---
+        # On utilise des clés explicites pour que ce soit facile à lire dans le contrôleur
+        self.data['moteurs'] = [
+            motor_front_left, 
+            motor_front_right, 
+            motor_back_left, 
+            motor_back_right
+        ]
+        #Si ce sont des nombres décimaux entre 0.0 et 1.0 : 1.0 veut dire moteur à fond.
+        # PWM classique.
+        # Autour de 1000 : Le moteur est coupé ou tourne au ralenti minimum (pas de poussée).
+        # Autour de 1500 : Le moteur tourne à mi-puissance (proche du vol stationnaire).
+        # Autour de 2000 : Le moteur est à fond absolu (100% de sa puissance).
+
+
     def on_collision(self, msg):
         # Collision IDs
         # 1001 - Gate

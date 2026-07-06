@@ -18,15 +18,65 @@ MOTOR_FRONT_RIGHT = 1
 MOTOR_BACK_LEFT = 0
 MOTOR_BACK_RIGHT = 0
 
-def update_motor_control(mavlink_conn, system_boot_ms):
-    motor_rpms = [MOTOR_FRONT_LEFT, MOTOR_FRONT_RIGHT, MOTOR_BACK_LEFT, MOTOR_BACK_RIGHT, 0, 0, 0, 0]
+# PARAMÈTRES REQUIS POUR LE VOL DIRECT (À AJUSTER SELON TON SIMU)
+# Note : Si ton simu utilise des valeurs de 0.0 à 1.0, remplace 5000 par 0.5, et 400 par 0.05
+HOVER_RPM = 5200      # Vitesse moteur de base pour contrer la gravité
+BASE_FORWARD = 200    # Pour que le drone avance légèrement par défaut
+
+GAIN_YAW = 400        # Sensibilité pour pivoter à gauche/droite
+GAIN_PITCH = 300      # Sensibilité pour monter/descendre
+
+def update_motor_control(mavlink_conn,system_boot_ms, shared_data):
+    # 1. Comportement par défaut (Pas de porte visible : Vol stationnaire + avance lente)
+    m_fl = HOVER_RPM + BASE_FORWARD  # Avant-Gauche
+    m_fr = HOVER_RPM + BASE_FORWARD  # Avant-Droit
+    m_bl = HOVER_RPM - BASE_FORWARD  # Arrière-Gauche
+    m_br = HOVER_RPM - BASE_FORWARD  # Arrière-Droit
+
+    # 2. Si la vision détecte la porte orange
+    if shared_data.get('gate_visible'):
+        gate_x = shared_data.get('gate_x', 0.0)
+        gate_y = shared_data.get('gate_y', 0.0)
+
+        # Calcul des corrections
+        # Yaw (Axe X) : Pour tourner à droite, on accélère à gauche et on ralentit à droite
+        corr_yaw = gate_x * GAIN_YAW
+        
+        # Pitch (Axe Y) : Pour monter (gate_y < 0), on accélère uniformément tous les moteurs 
+        # Pour piquer vers l'avant, on accélère l'arrière et ralentit l'avant.
+        # Ici on utilise une approche mixte (Hauteur + Compensation)
+        corr_pitch = -gate_y * GAIN_PITCH
+
+        # Application de la matrice de mixage sur les moteurs
+        m_fl = HOVER_RPM + BASE_FORWARD + corr_pitch - corr_yaw
+        m_fr = HOVER_RPM + BASE_FORWARD + corr_pitch + corr_yaw
+        m_bl = HOVER_RPM - BASE_FORWARD + corr_pitch - corr_yaw
+        m_br = HOVER_RPM - BASE_FORWARD + corr_pitch + corr_yaw
+
+    # Stockage des valeurs pour tes logs
+    # shared_data['moteurs'] = [int(m_fl), int(m_fr), int(m_bl), int(m_br)]
+
+    # MAVLink attend un tableau de 8 actuateurs
+    motor_rpms = [int(m_fl), int(m_fr), int(m_bl), int(m_br), 0, 0, 0, 0]
+
+    # Envoi direct au simulateur
     mavlink_conn.mav.set_actuator_control_target_send(
-        int(time.time() * 1e6),
+        int(time.time() * 1e6), # Timestamp en microsecondes
         mavlink_conn.target_system,
         mavlink_conn.target_component,
-        0,
+        0, # Groupe de contrôle (0 = Moteurs principaux)
         motor_rpms
     )
+
+# def update_motor_control(mavlink_conn, system_boot_ms):
+#     motor_rpms = [MOTOR_FRONT_LEFT, MOTOR_FRONT_RIGHT, MOTOR_BACK_LEFT, MOTOR_BACK_RIGHT, 0, 0, 0, 0]
+#     mavlink_conn.mav.set_actuator_control_target_send(
+#         int(time.time() * 1e6),
+#         mavlink_conn.target_system,
+#         mavlink_conn.target_component,
+#         0,
+#         motor_rpms
+#     )
 
 # --------------------------------------------------------------------------------------
 # ATTITUDE CONTROLS
@@ -60,6 +110,10 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms, shared_data):
     body_yaw_rate             : Body yaw rate [rad/s] (type:float)
     thrust                    : Collective thrust, normalized to 0 .. 1 (-1 .. 1 for vehicles capable of reverse trust) (type:float)
     """
+    # Récupération de la puissance réelle des moteurs reçue du simulateur
+    pwms = shared_data.get('moteurs', [0, 0, 0, 0])
+    status_moteurs = f"PWM Moteurs -> M1:{pwms[0]} M2:{pwms[1]} M3:{pwms[2]} M4:{pwms[3]}"
+
 
     # Si la vision détecte un portail orange
     if shared_data.get('gate_visible'):
@@ -97,7 +151,7 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms, shared_data):
             yaw_rate_to_gate,
             thrust_to_gate
         )
-        logger.info(f"[PILOTE] CIBLE VISIBLE -> Ordres envoyés : Pitch={pitch_rate_to_gate:.2f} | Yaw={yaw_rate_to_gate:.2f} | Thrust={thrust_to_gate:.2f}")
+        logger.info(f"[PILOTE] CIBLE VISIBLE -> Ordres envoyés : Pitch={pitch_rate_to_gate:.2f} | Yaw={yaw_rate_to_gate:.2f} | Thrust={thrust_to_gate:.2f} | {status_moteurs}")
 
     else:
         # Mode recherche / avancement par défaut si aucun portail visible
@@ -112,7 +166,7 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms, shared_data):
             YAW_RATE,
             THRUST
         )
-        logger.info(f"[PILOTE] MODE RECHERCHE -> Ordres par défaut : Pitch={PITCH_RATE:.2f} | Yaw={YAW_RATE:.2f} | Thrust={THRUST:.2f}")
+        logger.info(f"[PILOTE] MODE RECHERCHE -> Ordres par défaut : Pitch={PITCH_RATE:.2f} | Yaw={YAW_RATE:.2f} | Thrust={THRUST:.2f} | {status_moteurs}")
 
 # --------------------------------------------------------------------------------------
 # POSITION CONTROLS
@@ -182,10 +236,10 @@ class Controller:
 
     def update(self):
         # send automated targets to sim flight controller
-        update_attitude_flight_control(self.sim_conn, self.system_boot_ms,self.data)
+        # update_attitude_flight_control(self.sim_conn, self.system_boot_ms,self.data)
         # alternatively one of
         # update_position_flight_control(self.sim_conn, self.system_boot_ms)
-        update_motor_control(self.sim_conn, self.system_boot_ms)
+        update_motor_control(self.sim_conn, self.system_boot_ms,self.data)
 
         time.sleep(1.0 / CONTROL_HZ)
 
