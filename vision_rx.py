@@ -121,8 +121,8 @@ class VisionRX:
                     #On cherche un contour qui a un "Enfant" (le trou de la porte)
                     #hierarchy[0][i][2] != -1 signifie qu'il y a un enfant
                     if hierarchy[0][i][2] != -1:
-                        #area = cv2.contourArea(cnt)
-                        #if area > 2000: 
+                        #Cadre extérieur de la porte
+                        x, y, w, h = cv2.boundingRect(cnt)
 
                         child_idx = hierarchy[0][i][2]
                         child_area = cv2.contourArea(contours[child_idx])
@@ -146,6 +146,26 @@ class VisionRX:
                             logger.info(f"[VISION] Porte trouvée ! X={target_center_x:.2f} | Y={target_center_y:.2f} | Ratio={target_size_ratio:.3f}")
 
                             gate_found = True
+
+                            ######
+                            #Pour l'affichage :
+                                #En vert : Le cadre extérieur
+                            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 3)
+                            cv2.putText(img, "PORTE DETECTEE", (x, y-10), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                            #En rouge : Le trou intérieur (pour vérifier)
+                            xi, yi, wi, hi = cv2.boundingRect(contours[child_idx])
+                            cv2.rectangle(img, (xi, yi), (xi + wi, yi + hi), (0, 0, 255), 2)
+                            cv2.putText(img, f"Trou de la porte - Area: {int(child_area)}", (xi, yi-10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                            #Le centre (en bleu)
+                            cv2.circle(img, (xi + wi//2, yi + hi//2), 7, (255, 0, 0), -1)
+
+                            #On stocke l'image modifiée dans le dictionnaire partagé pour le thread principal
+                            self.data['last_img'] = img
+                            #####
+
+
                             break # On prend la première porte valide trouvée
                         
             if not gate_found:

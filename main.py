@@ -9,50 +9,61 @@ from setup import setup_components
 
 ##############
 import logging
+import cv2
 import os
-# Configuration du fichier de log
-os.makedirs('log', exist_ok=True)
 
-logging.basicConfig(
-    filename='log/flight_log.txt',
-    filemode='w',  # 'w' pour écraser le fichier à chaque nouveau lancement
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    encoding='utf8',
-    datefmt='%H:%M:%S',
-    level=logging.INFO
-)
+try :
+    # Configuration du fichier de log
+    os.makedirs('log', exist_ok=True)
 
-logger = logging.getLogger("DronePilot")
-logger.info("--- DÉMARRAGE DU LOG DE VOL ---")
-##############
+    logging.basicConfig(
+        filename='log/flight_log.txt',
+        filemode='w',  # 'w' pour écraser le fichier à chaque nouveau lancement
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        encoding='utf8',
+        datefmt='%H:%M:%S',
+        level=logging.INFO
+    )
 
-# Modify these properties if you want to run the server remotely for example
-SIM_SERVER_UDP_IP = "127.0.0.1"
-SIM_SERVER_UDP_PORT = 14550
+    logger = logging.getLogger("DronePilot")
+    logger.info("--- DÉMARRAGE DU LOG DE VOL ---")
+    ##############
 
-# time since sim started ms
-system_boot_ms = int(time.time() * 1000)
+    # Modify these properties if you want to run the server remotely for example
+    SIM_SERVER_UDP_IP = "127.0.0.1"
+    SIM_SERVER_UDP_PORT = 14550
 
-# arbitrary shared data between the various components
-shared_data = {}
+    # time since sim started ms
+    system_boot_ms = int(time.time() * 1000)
 
-# setup components
-components = setup_components(shared_data, system_boot_ms, SIM_SERVER_UDP_IP, SIM_SERVER_UDP_PORT)
-controller = components['controller']
-ts_loop = components['ts_loop']
-mavlink_rx = components['mavlink_rx']
-vision_rx = components['vision_rx']
+    # arbitrary shared data between the various components
+    shared_data = {}
 
-print("Arming drone...", flush=True)
-controller.arm()
-print("Starting control loop...", flush=True)
-is_running = True
-while is_running:
-    controller.update()
+    # setup components
+    components = setup_components(shared_data, system_boot_ms, SIM_SERVER_UDP_IP, SIM_SERVER_UDP_PORT)
+    controller = components['controller']
+    ts_loop = components['ts_loop']
+    mavlink_rx = components['mavlink_rx']
+    vision_rx = components['vision_rx']
 
-# exit
-ts_loop.get_thread_for_join().join(timeout=1.0)
-mavlink_rx.get_thread_for_join().join(timeout=1.0)
-vision_rx.get_thread_for_join().join(timeout=1.0)
+    print("Arming drone...", flush=True)
+    controller.arm()
+    print("Starting control loop...", flush=True)
+    is_running = True
+    while is_running:
+        controller.update()
+        frame_to_show = shared_data.get('last_frame')
+        if frame_to_show is not None:
+                cv2.imshow("Drone Vision - Orange Gate Detection", frame_to_show)
+        # 3. ÉCRAN OBLIGATOIRE POUR OPENCV : waitKey rafraîchit la fenêtre (1ms de pause)
+            # Si on appuie sur 'q', on quitte proprement
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+finally:
+    cv2.destroyAllWindows()
+    # exit
+    ts_loop.get_thread_for_join().join(timeout=1.0)
+    mavlink_rx.get_thread_for_join().join(timeout=1.0)
+    vision_rx.get_thread_for_join().join(timeout=1.0)
 
-print("Client exited!", flush=True)
+    print("Client exited!", flush=True)
