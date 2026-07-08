@@ -21,15 +21,14 @@ class VisionRX:
         self.data = data
         self.thread = threading.Thread(
             target=self._vision_loop,
-            daemon=True
-            #Pour éviter problème, lors de la fin du process
-            # daemon=False
+            daemon=False
         )
         self.is_running = True
         self.thread.start()
 
     def get_thread_for_join(self):
         self.is_running = False
+        cv2.destroyAllWindows()
         return self.thread
 
     def _vision_loop(self):
@@ -162,12 +161,19 @@ class VisionRX:
                             cv2.circle(img, (xi + wi//2, yi + hi//2), 7, (255, 0, 0), -1)
 
                             #On stocke l'image modifiée dans le dictionnaire partagé pour le thread principal
-                            self.data['last_img'] = img
+                            # self.data['last_img'] = img
                             #####
 
 
-                            break # On prend la première porte valide trouvée
-                        
+                            # break # On prend la première porte valide trouvée
+            
+            #Affiche l'image brute avec les rectangles
+            cv2.imshow("Vision du drone", img)
+            #Affiche ce que le drone "voit" en binaire
+            cv2.imshow("Mask Orange", mask)
+            
+            cv2.waitKey(1)
+
             if not gate_found:
                 self.data['gate_visible'] = False
                 self.data['gate_x'] = None

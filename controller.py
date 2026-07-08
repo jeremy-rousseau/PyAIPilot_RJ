@@ -139,12 +139,19 @@ def determine_motor_mode(shared_data):
 
     # 1. Mode par défaut : Si pas de porte, on stationne
     if not shared_data.get('gate_visible', False):
-        MOTOR_FRONT_LEFT = 0
-        MOTOR_FRONT_RIGHT = 0
-        MOTOR_BACK_LEFT = 0
-        MOTOR_BACK_RIGHT = 0
+        MOTOR_FRONT_LEFT = 0.3
+        MOTOR_FRONT_RIGHT = 0.3
+        MOTOR_BACK_LEFT = 0.305
+        MOTOR_BACK_RIGHT = 0.305
 
-        return "MODE: STATIONNEMENT"
+        return "MODE: AVANCE LENTE"
+
+        # MOTOR_FRONT_LEFT = 0
+        # MOTOR_FRONT_RIGHT = 0
+        # MOTOR_BACK_LEFT = 0
+        # MOTOR_BACK_RIGHT = 0
+
+        # return "MODE: STATIONNEMENT"
     else :
         # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y)
         # En OpenCV, Y augmente vers le bas de l'écran. 
