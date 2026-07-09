@@ -132,41 +132,77 @@ def update_position_flight_control(mavlink_conn, system_boot_ms):
 def determine_motor_mode(shared_data):
     global MOTOR_FRONT_LEFT, MOTOR_FRONT_RIGHT, MOTOR_BACK_LEFT, MOTOR_BACK_RIGHT
 
+    # 1. Mode par défaut : Si pas de porte, on avance lentement
+    if not shared_data.get('gate_visible', False):
+        MOTOR_FRONT_LEFT = 0.25
+        MOTOR_FRONT_RIGHT = 0.25
+        MOTOR_BACK_LEFT = 0.251
+        MOTOR_BACK_RIGHT = 0.251
+    #TODO : trouver les bons para pour garder le drone droit tout en allant vers l'avant
+        return "MODE: AVANCE LENTE"#TODO : desactiver log quand la course pas encore lancé
+
     gate_x = shared_data.get('gate_x', 0.0)
     gate_y = shared_data.get('gate_y', 0.0)
 
     ZONE_MORTE = 0.10
 
-    # 1. Mode par défaut : Si pas de porte, on stationne
-    if not shared_data.get('gate_visible', False):
-        MOTOR_FRONT_LEFT = 0.3
-        MOTOR_FRONT_RIGHT = 0.3
-        MOTOR_BACK_LEFT = 0.305
-        MOTOR_BACK_RIGHT = 0.305
+    # -------------------------------------------------------------
+    # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y)
+    # En OpenCV, Y augmente vers le bas de l'écran. 
+    # Donc si gate_y > ZONE_MORTE, la porte est PLUS BASSE que le drone -> Descendre
+    # -------------------------------------------------------------
 
-        return "MODE: AVANCE LENTE"
+    if gate_y > ZONE_MORTE:
+        MOTOR_FRONT_LEFT = -0.1
+        MOTOR_FRONT_RIGHT = -0.1
+        MOTOR_BACK_LEFT = -0.1
+        MOTOR_BACK_RIGHT = -0.1
+    
+        return "MODE: DESCENDRE"
+    
+    elif gate_y < -ZONE_MORTE:
+        MOTOR_FRONT_LEFT = 0.2
+        MOTOR_FRONT_RIGHT = 0.2
+        MOTOR_BACK_LEFT = 0.2
+        MOTOR_BACK_RIGHT = 0.2   
+        return "MODE: MONTER"
+        
+    # -------------------------------------------------------------
+    # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
+    # Si gate_x > ZONE_MORTE, la porte est à DROITE -> Tourner à droite
+    # -------------------------------------------------------------
+
+    if gate_x > ZONE_MORTE:
+        # DROITE (Yaw à droite) : Moteurs Gauches poussent plus, Moteurs Droits poussent moins
+        MOTOR_FRONT_LEFT = 0.251
+        MOTOR_FRONT_RIGHT = 0.25
+        MOTOR_BACK_LEFT = 0.251
+        MOTOR_BACK_RIGHT = 0.25
+
+        return "MODE: DROITE"
+        
+    elif gate_x < -ZONE_MORTE:
+        # GAUCHE (Yaw à gauche) : Moteurs Droits poussent plus, Moteurs Gauches poussent moins
+        MOTOR_FRONT_LEFT = 0.25
+        MOTOR_FRONT_RIGHT = 0.251
+        MOTOR_BACK_LEFT = 0.25
+        MOTOR_BACK_RIGHT = 0.251
+
+        return "MODE: GAUCHE"
+
+    MOTOR_FRONT_LEFT = 0.25
+    MOTOR_FRONT_RIGHT = 0.25
+    MOTOR_BACK_LEFT = 0.251
+    MOTOR_BACK_RIGHT = 0.251
+
+    return "MODE: AVANCE LENTE (vers porte)"
+
 
         # MOTOR_FRONT_LEFT = 0
         # MOTOR_FRONT_RIGHT = 0
         # MOTOR_BACK_LEFT = 0
         # MOTOR_BACK_RIGHT = 0
-
         # return "MODE: STATIONNEMENT"
-    else :
-        # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y)
-        # En OpenCV, Y augmente vers le bas de l'écran. 
-        # Donc si gate_y > ZONE_MORTE, la porte est PLUS BASSE que le drone -> Descendre
-        if gate_y > ZONE_MORTE:
-            MOTOR_FRONT_LEFT = -0.1
-            MOTOR_FRONT_RIGHT = -0.1
-            MOTOR_BACK_LEFT = -0.1
-            MOTOR_BACK_RIGHT = -0.1
-        
-        return "MODE: DESCENDRE"
-        
-
-
-
 
 # --------------------------------------------------------------------------------------
 # Control Loop
