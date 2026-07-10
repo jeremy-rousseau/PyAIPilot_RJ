@@ -34,10 +34,21 @@ def update_motor_control(mavlink_conn, system_boot_ms):
 # --------------------------------------------------------------------------------------
 # ATTITUDE CONTROLS
 # --------------------------------------------------------------------------------------
+#default
 PITCH_RATE = -0.3   # rad/s (negative = pitch forward)
 ROLL_RATE  = 0.0
 YAW_RATE   = 0.0
 THRUST     = 0.6    # 0.0 - 1.0
+
+#decide_drone_movement
+# PITCH_RATE = 0.0   # rad/s (negative = pitch forward)
+# ROLL_RATE  = 0.0
+# YAW_RATE   = 0.0
+# THRUST     = 0.0    # 0.0 - 1.0
+
+# ZONE_MORTE = 0.10
+# THRUST_HOVER = 0.52 # Ta valeur de référence pour le vol stationnaire
+########
 
 RATES_ATTITUDE_MASK = (
     mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE
@@ -134,10 +145,10 @@ def determine_motor_mode(shared_data):
 
     # 1. Mode par défaut : Si pas de porte, on avance lentement
     if not shared_data.get('gate_visible', False):
-        MOTOR_FRONT_LEFT = 0.25
-        MOTOR_FRONT_RIGHT = 0.25
-        MOTOR_BACK_LEFT = 0.251
-        MOTOR_BACK_RIGHT = 0.251
+        MOTOR_FRONT_LEFT = 0.2799
+        MOTOR_FRONT_RIGHT = 0.2799
+        MOTOR_BACK_LEFT = 0.28
+        MOTOR_BACK_RIGHT = 0.28
     #TODO : trouver les bons para pour garder le drone droit tout en allant vers l'avant
         return "MODE: AVANCE LENTE"#TODO : desactiver log quand la course pas encore lancé
 
@@ -152,48 +163,48 @@ def determine_motor_mode(shared_data):
     # Donc si gate_y > ZONE_MORTE, la porte est PLUS BASSE que le drone -> Descendre
     # -------------------------------------------------------------
 
-    if gate_y > ZONE_MORTE:
-        MOTOR_FRONT_LEFT = -0.1
-        MOTOR_FRONT_RIGHT = -0.1
-        MOTOR_BACK_LEFT = -0.1
-        MOTOR_BACK_RIGHT = -0.1
+    # if gate_y > ZONE_MORTE:
+    #     MOTOR_FRONT_LEFT = 0.25
+    #     MOTOR_FRONT_RIGHT = 0.25
+    #     MOTOR_BACK_LEFT = 0.25
+    #     MOTOR_BACK_RIGHT = 0.25
     
-        return "MODE: DESCENDRE"
+    #     return "MODE: DESCENDRE"
     
-    elif gate_y < -ZONE_MORTE:
-        MOTOR_FRONT_LEFT = 0.2
-        MOTOR_FRONT_RIGHT = 0.2
-        MOTOR_BACK_LEFT = 0.2
-        MOTOR_BACK_RIGHT = 0.2   
-        return "MODE: MONTER"
+    # elif gate_y < -ZONE_MORTE:
+    #     MOTOR_FRONT_LEFT = 0.35
+    #     MOTOR_FRONT_RIGHT = 0.35
+    #     MOTOR_BACK_LEFT = 0.35
+    #     MOTOR_BACK_RIGHT = 0.35
+    #     return "MODE: MONTER"
         
     # -------------------------------------------------------------
     # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
     # Si gate_x > ZONE_MORTE, la porte est à DROITE -> Tourner à droite
     # -------------------------------------------------------------
 
-    if gate_x > ZONE_MORTE:
-        # DROITE (Yaw à droite) : Moteurs Gauches poussent plus, Moteurs Droits poussent moins
-        MOTOR_FRONT_LEFT = 0.251
-        MOTOR_FRONT_RIGHT = 0.25
-        MOTOR_BACK_LEFT = 0.251
-        MOTOR_BACK_RIGHT = 0.25
+    # if gate_x > ZONE_MORTE:
+    #     # DROITE (Yaw à droite) : Moteurs Gauches poussent plus, Moteurs Droits poussent moins
+    #     MOTOR_FRONT_LEFT = 0.30
+    #     MOTOR_FRONT_RIGHT = 0.299
+    #     MOTOR_BACK_LEFT = 0.30
+    #     MOTOR_BACK_RIGHT = 0.299
 
-        return "MODE: DROITE"
+    #     return "MODE: DROITE"
         
-    elif gate_x < -ZONE_MORTE:
-        # GAUCHE (Yaw à gauche) : Moteurs Droits poussent plus, Moteurs Gauches poussent moins
-        MOTOR_FRONT_LEFT = 0.25
-        MOTOR_FRONT_RIGHT = 0.251
-        MOTOR_BACK_LEFT = 0.25
-        MOTOR_BACK_RIGHT = 0.251
+    # elif gate_x < -ZONE_MORTE:
+    #     # GAUCHE (Yaw à gauche) : Moteurs Droits poussent plus, Moteurs Gauches poussent moins
+    #     MOTOR_FRONT_LEFT = 0.299
+    #     MOTOR_FRONT_RIGHT = 0.30
+    #     MOTOR_BACK_LEFT = 0.299
+    #     MOTOR_BACK_RIGHT = 0.30
 
-        return "MODE: GAUCHE"
+    #     return "MODE: GAUCHE"
 
-    MOTOR_FRONT_LEFT = 0.25
-    MOTOR_FRONT_RIGHT = 0.25
-    MOTOR_BACK_LEFT = 0.251
-    MOTOR_BACK_RIGHT = 0.251
+    MOTOR_FRONT_LEFT = 0.279
+    MOTOR_FRONT_RIGHT = 0.279
+    MOTOR_BACK_LEFT = 0.28
+    MOTOR_BACK_RIGHT = 0.28
 
     return "MODE: AVANCE LENTE (vers porte)"
 
@@ -204,11 +215,72 @@ def determine_motor_mode(shared_data):
         # MOTOR_BACK_RIGHT = 0
         # return "MODE: STATIONNEMENT"
 
+
+def decide_drone_movement(shared_data):
+    # On déclare qu'on va modifier les constantes globales en haut du script
+    global PITCH_RATE, ROLL_RATE, YAW_RATE, THRUST
+
+    gate_x = shared_data.get('gate_x', 0.0)
+    gate_y = shared_data.get('gate_y', 0.0)
+    gate_visible = shared_data.get('gate_visible', False)
+    
+    # Réinitialisation par défaut (Vol stationnaire)
+    PITCH_RATE = 0.0
+    ROLL_RATE  = 0.0
+    YAW_RATE   = 0.0
+    THRUST     = THRUST_HOVER
+    
+    mode = "MODE: RECHERCHE"
+
+    if gate_visible:
+        # -------------------------------------------------------------
+        # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y en OpenCV)
+        # -------------------------------------------------------------
+        if gate_y > ZONE_MORTE:
+            THRUST = THRUST_HOVER - 0.12  # On baisse les gaz pour descendre
+            mode = "MODE: DESCENDRE"
+            
+        elif gate_y < -ZONE_MORTE:
+            THRUST = THRUST_HOVER + 0.15  # On pousse les gaz pour monter
+            mode = "MODE: MONTER"
+            
+        # -------------------------------------------------------------
+        # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
+        # -------------------------------------------------------------
+        elif gate_x > ZONE_MORTE:
+            YAW_RATE = 0.4   # Rotation vers la droite (rad/s)
+            mode = "MODE: DROITE"
+            
+        elif gate_x < -ZONE_MORTE:
+            YAW_RATE = -0.4  # Rotation vers la gauche (rad/s)
+            mode = "MODE: GAUCHE"
+            
+        # -------------------------------------------------------------
+        # PRIORITÉ 3 : ALIGNÉ -> AVANCER
+        # -------------------------------------------------------------
+        else:
+            PITCH_RATE = -0.3  # Négatif = pitch forward pour avancer
+            THRUST = THRUST_HOVER + 0.05 # Léger filet de gaz pour compenser la translation
+            mode = "MODE: AVANCE VERS LA PORTE"
+            
+    else:
+        # Mode recherche si la porte est perdue de vue
+        YAW_RATE = 0.3
+        THRUST = THRUST_HOVER
+        mode = "MODE: RECHERCHE PORTE (Rotation)"
+
+    # --- SÉCURISATION DES PLAGES ---
+    THRUST = max(0.0, min(1.0, THRUST))
+    PITCH_RATE = max(-1.0, min(1.0, PITCH_RATE))
+    YAW_RATE = max(-1.0, min(1.0, YAW_RATE))
+
+    return mode
 # --------------------------------------------------------------------------------------
 # Control Loop
 # --------------------------------------------------------------------------------------
 
 CONTROL_HZ = 250
+DEPART = True
 
 class Controller:
     def __init__(self, sim_conn, data, system_boot_ms):
@@ -217,13 +289,21 @@ class Controller:
         self.system_boot_ms = system_boot_ms
 
     def update(self):
-        mode_actuel = determine_motor_mode(self.data)
-        logger.info(f"[LOG] {mode_actuel}")
+        global DEPART
+        
         # send automated targets to sim flight controller
         # update_attitude_flight_control(self.sim_conn, self.system_boot_ms)
         # alternatively one of
         # update_position_flight_control(self.sim_conn, self.system_boot_ms)
-        update_motor_control(self.sim_conn, self.system_boot_ms)
+        if DEPART :
+            time.sleep(4)
+            DEPART = False
+        else :
+            update_motor_control(self.sim_conn, self.system_boot_ms)
+        
+        mode_actuel = determine_motor_mode(self.data)
+        # mode_actuel = decide_drone_movement(self.data)
+        logger.info(f"[LOG] {mode_actuel}")
 
         time.sleep(1.0 / CONTROL_HZ)
 
