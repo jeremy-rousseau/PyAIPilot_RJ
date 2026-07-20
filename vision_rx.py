@@ -26,9 +26,20 @@ class VisionRX:
         self.is_running = True
         self.thread.start()
 
+        # Configuration pour l'enregistrement MP4
+        self.video_writer = None
+        self.filename = "vol_drone.mp4"
+        self.fps = 30.0  
+
+
+
+
     def get_thread_for_join(self):
         self.is_running = False
         cv2.destroyAllWindows()
+        if self.video_writer is not None:
+            self.video_writer.release()
+            print(f"[VISION] Enregistrement vidéo sauvegardé dans : {self.filename}")   
         return self.thread
 
     def _vision_loop(self):
@@ -94,6 +105,25 @@ class VisionRX:
         try:
             height, width = img.shape[:2]
             cx, cy = width // 2, height // 2
+
+            #########################################
+            img_height, img_width, _ = img.shape
+
+            # Initialisation unique du VideoWriter à la première image reçue
+            if self.video_writer is None:
+                # Utilisation du codec 'mp4v' pour générer un fichier .mp4
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                self.video_writer = cv2.VideoWriter(
+                    self.filename, 
+                    fourcc, 
+                    self.fps, 
+                    (img_width, img_height)
+                )
+            ##########################################
+
+
+
+
 
             # 1. Conversion en HSV pour la couleur de base
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -175,11 +205,14 @@ class VisionRX:
             cv2.imshow("Vision du drone", img)
             #Affiche ce que le drone "voit" en binaire
             cv2.imshow("Masque Orange", mask)
-
+            ################
+            self.video_writer.write(img)
+            ################
             cv2.waitKey(1)
 
         except Exception as e:
-                print(f'Error processing frame: {str(e)}')    
+                print(f'Error processing frame: {str(e)}')
+ 
         return
 
     ######

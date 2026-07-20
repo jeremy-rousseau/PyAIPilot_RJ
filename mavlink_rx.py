@@ -7,6 +7,10 @@ from pymavlink import mavutil
 ENCAPSULATED_RACE_STATUS_MSG_ID = 1
 ENCAPSULATED_TRACK_INFO_MSG_ID  = 2
 
+#Pour les logs
+import logging
+logger = logging.getLogger("DronePilot")
+
 class MAVLinkRX:
 
     def __init__(self, mavlink_connection, data):
@@ -188,9 +192,10 @@ class MAVLinkRX:
         reset_count = msg.reset_counter
 
     def on_highres_imu(self, msg):
-        acceleration_x, acceleration_y, acceleration_z = msg.xacc, msg.yacc, msg.zacc
-        gyro_x, gyro_y, gyro_z = msg.xgyro, msg.ygyro, msg.zgyro
-        time_boot_us = msg.time_usec
+        # Accelerations (m/s^2) et Vitesses angulaires (rad/s)
+        self.data['imu_acc'] = (msg.xacc, msg.yacc, msg.zacc)
+        self.data['imu_gyro'] = (msg.xgyro, msg.ygyro, msg.zgyro) # (roll_rate, pitch_rate, yaw_rate)
+        self.data['imu_time_us'] = msg.time_usec
 
     def on_encapsulated_data(self, msg):
         if msg:
@@ -203,15 +208,33 @@ class MAVLinkRX:
                 self.on_track_data_packet(msg)
 
     def on_race_status(self, msg):
-        raw_payload = bytes(msg.data)
-        # data_type - ID of this message
-        # sim_boot_time_ms - elapsed ms on server since sim boot
-        # race_start_boot_time_ms - elapsed ms on server since sim boot when race started. None or < 0 if race has not started
-        # race_finish_time_ns - elapsed ns on server since sim boot when race finished. None or < 0 if race is ongoing
-        # active_gate_index - current index of target race gate
-        # last_gate_race_time - race time in seconds when last gate was passed
-        data_type, sim_boot_time_ms, race_start_boot_time_ms, race_finish_time_ns, active_gate_index, last_gate_race_time = struct.unpack_from(
-            "<BQqqIq", raw_payload)
+            raw_payload = bytes(msg.data)
+            
+            # Dépaquetage du buffer binaire selon le format Little-Endian (<)
+            # B = uint8 (1 octet), Q = uint64 (8 octets), q = int64 (8 octets), I = uint32 (4 octets)
+            (data_type, 
+            sim_boot_time_ms, 
+            race_start_boot_time_ms, 
+            race_finish_time_ns, 
+            active_gate_index, 
+            last_gate_race_time) = struct.unpack_from("<BQqqIq", raw_payload)
+
+            # 1. Analyse de l'état de la course
+
+            # 1. Vérifier si un temps de départ valide est défini (> 0)
+            valid_start_time = race_start_boot_time_ms is not None and race_start_boot_time_ms > 0
+            # 2. Le départ est effectif SEULEMENT SI le temps serveur actuel a dépassé le temps de départ
+            has_started = valid_start_time and (sim_boot_time_ms >= race_start_boot_time_ms)
+            has_finished = race_finish_time_ns is not None and race_finish_time_ns > 0
+
+            # 2. Mise à jour de shared_data pour que ton contrôleur y ait accès
+            self.data['race_started'] = has_started
+            self.data['race_finished'] = has_finished
+            self.data['target_gate_idx'] = active_gate_index  # Index de la porte cible actuelle !
+            self.data['last_gate_time'] = last_gate_race_time / 1e9 if last_gate_race_time > 0 else 0.0
+
+            # Log informatif
+            logger.info(f"[RACE] Porte cible : #{active_gate_index} | Démarré : {has_started}")
 
     def on_track_data_packet(self, msg):
         raw_payload = bytes(msg.data)

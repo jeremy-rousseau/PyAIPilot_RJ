@@ -57,8 +57,10 @@ try:
 
 except KeyboardInterrupt:
     # exit
-    ts_loop.get_thread_for_join().join(timeout=1.0)#TODO problème à régler NoneType has no attribute
-    mavlink_rx.get_thread_for_join().join(timeout=1.0)
     vision_rx.get_thread_for_join().join(timeout=1.0)
+    mavlink_rx.get_thread_for_join().join(timeout=1.0)
+    ts_loop.get_thread_for_join().join(timeout=1.0)#TODO problème à régler NoneType has no attribute
+    
+    
 finally :
     print("Client exited!", flush=True)
