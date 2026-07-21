@@ -83,46 +83,72 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms):
         THRUST
     )
 
+# Ici on stabilise le drone, on le remet "droit" après avoir tourner à gauche ou à droite
 def decide_drone_movement(data):
     """
     Calcule les vitesses angulaires (rad/s) et la poussée (0..1)
     en fonction de la position de la porte et de la stabilisation IMU.
-
-    Ici on stabilise le drone, on le remet "droit" après avoir tourner à gauche ou à droite
     """
-    # 1. Lecture des données capteurs / vision
     gate_x = data.get('gate_x', None)
     imu_gyro = data.get('imu_gyro', (0.0, 0.0, 0.0))  # (roll_rate, pitch_rate, yaw_rate)
     
     current_roll_rate = imu_gyro[0]
     current_yaw_rate  = imu_gyro[2]
 
-    # Paramètres de contrôle / Zones mortes
-    ZONE_MORTE = 0.05
-    K_D_YAW = 0.15   # Gain de freinage en rotation (Yaw)
-    K_D_ROLL = 0.20  # Gain de freinage latéral (Roll)
+    # --- PARAMÈTRES ADOUCIS ---
+    ZONE_MORTE = 0.008  
 
-    # 2. Valeurs par défaut (Pas de porte détectée ou porte centrée)
+    # Gains réduits pour éviter la brutalité
+    K_P_YAW  = 0.80   # (Était à 1.2 -> divisé par 2.4)
+    K_P_ROLL = 0.5   # (Était à 0.8 -> divisé par 2.3)
+
+    K_D_YAW  = 0.15   
+    K_D_ROLL = 0.20  
+
+    # Limites maximales de commande (Saturations)
+    MAX_YAW_RATE  = 0.08  # Limite la vitesse de rotation max
+    MAX_ROLL_RATE = 0.05  # Limite l'inclinaison max
+
     target_yaw_rate = 0.0
-    
+    target_roll_rate = 0.0
+
     # 3. Décision basée sur la vision
     if gate_x is not None:
-        if gate_x > ZONE_MORTE:
-            target_yaw_rate = 0.2    # Tourner à droite
-        elif gate_x < -ZONE_MORTE:
-            target_yaw_rate = -0.2   # Tourner à gauche
+        if abs(gate_x) > ZONE_MORTE:
+            target_yaw_rate  = K_P_YAW * gate_x
+            target_roll_rate = K_P_ROLL * gate_x
+
+            # Saturation des consignes (pour ne pas être "brute")
+            target_yaw_rate  = max(-MAX_YAW_RATE, min(MAX_YAW_RATE, target_yaw_rate))
+            target_roll_rate = max(-MAX_ROLL_RATE, min(MAX_ROLL_RATE, target_roll_rate))
+
+            state_str = "DROITE" if gate_x > 0 else "GAUCHE"
         else:
-            target_yaw_rate = 0.0    # Porte centrée -> Annuler la rotation
+            target_yaw_rate  = 0.0
+            target_roll_rate = 0.0
+            state_str = "CENTRE"
+    else:
+        target_yaw_rate  = 0.0
+        target_roll_rate = 0.0
+        state_str = "RECHERCHE"
 
-    # 4. Calcul final avec freinage IMU (Remet à 0 + contre l'inertie)
-    # Si target_yaw_rate vaut 0, final_yaw compense le mouvement résiduel
+    # 4. Calcul final (Consigne - Freinage IMU)
     final_yaw_rate  = target_yaw_rate - (K_D_YAW * current_yaw_rate)
-    final_roll_rate = 0.0 - (K_D_ROLL * current_roll_rate)
+    final_roll_rate = target_roll_rate - (K_D_ROLL * current_roll_rate)
 
-    # Poussée et Pitch
-    # Note : Pitch négatif = piquer vers l'avant
-    final_pitch_rate = -0.3 
-    final_thrust = 0.55  # Ajuste selon la poussée requise pour maintenir l'altitude
+    # Avancement adouci pour laisser du temps à l'alignement
+    final_pitch_rate = -0.18  # (Était à -0.3)
+    final_thrust     = 0.55 
+
+    # 5. LOG DÉTAILLÉ DE DIAGNOSTIC
+    if gate_x is not None:
+        gx_str = f"{gate_x:.3f}"
+        logger.info(
+            f"[DIAG 🪛] Action: {state_str:<9} | "
+            f"GateX: {gx_str:<6} | "
+            f"Gyro(R,Y): ({current_roll_rate:+.2f}, {current_yaw_rate:+.2f}) | "
+            f"Cmd(R,Y): ({final_roll_rate:+.2f}, {final_yaw_rate:+.2f})"
+        )
 
     return final_roll_rate, final_pitch_rate, final_yaw_rate, final_thrust
 
@@ -198,26 +224,29 @@ def determine_motor_mode(shared_data):
     gate_x = shared_data.get('gate_x', 0.0)
     gate_y = shared_data.get('gate_y', 0.0)
 
-    ZONE_MORTE = 0.10
+    ZONE_MORTE = 0.1
 
     # -------------------------------------------------------------
     # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y)
     # -------------------------------------------------------------
 
     if gate_y > ZONE_MORTE:
-        MOTOR_FRONT_LEFT = 0.20
-        MOTOR_FRONT_RIGHT = 0.20
-        MOTOR_BACK_LEFT = 0.20
-        MOTOR_BACK_RIGHT = 0.20
-    
-        return "MODE: DESCENDRE"
+        MOTOR_FRONT_LEFT = 0.65
+        MOTOR_FRONT_RIGHT = 0.65
+        MOTOR_BACK_LEFT = 0.65
+        MOTOR_BACK_RIGHT = 0.65
+        return "MODE: MONTER ⬆️"
+
     
     elif gate_y < -ZONE_MORTE:
-        MOTOR_FRONT_LEFT = 0.40
-        MOTOR_FRONT_RIGHT = 0.40
-        MOTOR_BACK_LEFT = 0.40
-        MOTOR_BACK_RIGHT = 0.40
-        return "MODE: MONTER"
+        MOTOR_FRONT_LEFT = 0.25
+        MOTOR_FRONT_RIGHT = 0.25
+        MOTOR_BACK_LEFT = 0.25
+        MOTOR_BACK_RIGHT = 0.25
+    
+        return "MODE: DESCENDRE ⬇️"
+    
+    
         
     # # -------------------------------------------------------------
     # # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
@@ -231,7 +260,7 @@ def determine_motor_mode(shared_data):
         MOTOR_BACK_LEFT = 0.30
         MOTOR_BACK_RIGHT = 0.25
 
-        return "MODE: DROITE"
+        return "MODE: DROITE ➡️"
         
     elif gate_x < -ZONE_MORTE:
         # GAUCHE (Yaw à gauche) : Moteurs Droits poussent plus, Moteurs Gauches poussent moins
@@ -240,7 +269,7 @@ def determine_motor_mode(shared_data):
         MOTOR_BACK_LEFT = 0.25
         MOTOR_BACK_RIGHT = 0.30
 
-        return "MODE: GAUCHE"
+        return "MODE: GAUCHE ⬅️"
 
     # MOTOR_FRONT_LEFT = 0.2799999
     # MOTOR_FRONT_RIGHT = 0.2799999
@@ -251,7 +280,7 @@ def determine_motor_mode(shared_data):
     MOTOR_BACK_LEFT = 0.28
     MOTOR_BACK_RIGHT = 0.28
 
-    return "MODE: AVANCE LENTE (vers porte)"
+    return "MODE: AVANCE LENTE (vers porte) 🚪"
 
 
         # MOTOR_FRONT_LEFT = 0
@@ -339,7 +368,8 @@ class Controller:
 
         if not race_started:
             # Compte à rebours/attente
-            logger.info("[LOG] Attente du départ... Moteurs coupés (0%)")
+            # logger.info("[LOG] Attente du départ... Moteurs coupés (0%)")
+            pass
         else:
             ROLL_RATE, PITCH_RATE, YAW_RATE, THRUST = decide_drone_movement(self.data)
             # send automated targets to sim flight controller

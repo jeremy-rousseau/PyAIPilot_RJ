@@ -175,7 +175,9 @@ class VisionRX:
                             gate_x = (gate_pixel_x - cx) / (width / 2)
                             gate_y = (gate_pixel_y - cy) / (height / 2)
 
-                            logger.info(f"[VISION] Porte trouvée ! X={gate_x:.2f} | Y={gate_y:.2f}")#| Ratio={target_size_ratio:.3f}
+                            race_started = self.data.get('race_started', False)
+                            if race_started:
+                                logger.info(f"[VISION 🎥] Porte trouvée ! X={gate_x:.2f} | Y={gate_y:.2f}")#| Ratio={target_size_ratio:.3f}
                             
                             # Dessin du rectangle englobant principal
                             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 3)
@@ -199,7 +201,7 @@ class VisionRX:
                 self.data['gate_x'] = None
                 self.data['gate_y'] = None
                 # self.data['gate_size'] = None
-                logger.debug("[VISION] Aucune porte orange visible.")
+                logger.debug("[VISION 🎥] Aucune porte orange visible.")
 
             #Affiche l'image brute avec les rectangles
             cv2.imshow("Vision du drone", img)

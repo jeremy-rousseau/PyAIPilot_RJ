@@ -234,7 +234,7 @@ class MAVLinkRX:
             self.data['last_gate_time'] = last_gate_race_time / 1e9 if last_gate_race_time > 0 else 0.0
 
             # Log informatif
-            logger.info(f"[RACE] Porte cible : #{active_gate_index} | Démarré : {has_started}")
+            logger.info(f"[RACE ⭐] Porte cible : #{active_gate_index} | Démarré : {has_started}")
 
     def on_track_data_packet(self, msg):
         raw_payload = bytes(msg.data)
@@ -306,3 +306,6 @@ class MAVLinkRX:
 
         threat_level = msg.threat_level # 1-2 with 2 being higher impact collision
         impact = msg.horizontal_minimum_delta # this is not a delta - it is the impulse magnitude in kg m/s
+
+        collision_name = "Gate" if collision_id == 1001 else "Environment"
+        logger.info(f"[RACE ⭐] Collision avec {collision_name} 💥💥")
