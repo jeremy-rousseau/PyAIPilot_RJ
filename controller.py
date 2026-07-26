@@ -38,17 +38,7 @@ def update_motor_control(mavlink_conn, system_boot_ms):
 PITCH_RATE = -0.3   # rad/s (negative = pitch forward)
 ROLL_RATE  = 0.0
 YAW_RATE   = 0.0
-THRUST     = 0.1    # 0.0 - 1.0
-
-#decide_drone_movement
-# PITCH_RATE = 0.0   # rad/s (negative = pitch forward)
-# ROLL_RATE  = 0.0
-# YAW_RATE   = 0.0
-# THRUST     = 0.0    # 0.0 - 1.0
-
-# ZONE_MORTE = 0.10
-# THRUST_HOVER = 0.52 # Ta valeur de référence pour le vol stationnaire
-########
+THRUST     = 0.01    # 0.0 - 1.0
 
 RATES_ATTITUDE_MASK = (
     mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE
@@ -82,75 +72,6 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms):
         YAW_RATE,
         THRUST
     )
-
-# Ici on stabilise le drone, on le remet "droit" après avoir tourner à gauche ou à droite
-def decide_drone_movement(data):
-    """
-    Calcule les vitesses angulaires (rad/s) et la poussée (0..1)
-    en fonction de la position de la porte et de la stabilisation IMU.
-    """
-    gate_x = data.get('gate_x', None)
-    imu_gyro = data.get('imu_gyro', (0.0, 0.0, 0.0))  # (roll_rate, pitch_rate, yaw_rate)
-    
-    current_roll_rate = imu_gyro[0]
-    current_yaw_rate  = imu_gyro[2]
-
-    # --- PARAMÈTRES ADOUCIS ---
-    ZONE_MORTE = 0.008  
-
-    # Gains réduits pour éviter la brutalité
-    K_P_YAW  = 0.80   # (Était à 1.2 -> divisé par 2.4)
-    K_P_ROLL = 0.5   # (Était à 0.8 -> divisé par 2.3)
-
-    K_D_YAW  = 0.15   
-    K_D_ROLL = 0.20  
-
-    # Limites maximales de commande (Saturations)
-    MAX_YAW_RATE  = 0.08  # Limite la vitesse de rotation max
-    MAX_ROLL_RATE = 0.05  # Limite l'inclinaison max
-
-    target_yaw_rate = 0.0
-    target_roll_rate = 0.0
-
-    # 3. Décision basée sur la vision
-    if gate_x is not None:
-        if abs(gate_x) > ZONE_MORTE:
-            target_yaw_rate  = K_P_YAW * gate_x
-            target_roll_rate = K_P_ROLL * gate_x
-
-            # Saturation des consignes (pour ne pas être "brute")
-            target_yaw_rate  = max(-MAX_YAW_RATE, min(MAX_YAW_RATE, target_yaw_rate))
-            target_roll_rate = max(-MAX_ROLL_RATE, min(MAX_ROLL_RATE, target_roll_rate))
-
-            state_str = "DROITE" if gate_x > 0 else "GAUCHE"
-        else:
-            target_yaw_rate  = 0.0
-            target_roll_rate = 0.0
-            state_str = "CENTRE"
-    else:
-        target_yaw_rate  = 0.0
-        target_roll_rate = 0.0
-        state_str = "RECHERCHE"
-
-    # 4. Calcul final (Consigne - Freinage IMU)
-    final_yaw_rate  = target_yaw_rate - (K_D_YAW * current_yaw_rate)
-    final_roll_rate = target_roll_rate - (K_D_ROLL * current_roll_rate)
-
-    # Avancement adouci pour laisser du temps à l'alignement
-    final_pitch_rate = -0.18  # (Était à -0.3)
-    final_thrust     = 0.55 
-
-    # 5. LOG DÉTAILLÉ DE DIAGNOSTIC
-    if gate_x is not None:
-        gx_str = f"{gate_x:.3f}"
-        logger.info(
-            f"[DIAG 🪛] Action: {state_str:<9} | "
-            f"GateX: {gx_str:<6} | "
-            f"Gyro(R,Y): ({current_roll_rate:+.2f}, {current_yaw_rate:+.2f}) | "
-            f"Cmd(R,Y): ({final_roll_rate:+.2f}, {final_yaw_rate:+.2f})"
-        )
-
-    return final_roll_rate, final_pitch_rate, final_yaw_rate, final_thrust
 
 # --------------------------------------------------------------------------------------
 # POSITION CONTROLS
@@ -209,269 +130,138 @@ def decide_drone_movement(data):
 # --------------------------------------------------------------------------------------
 # MOTOR MODE CONTROLS
 # --------------------------------------------------------------------------------------
+# Variables globales pour le filtre passe-bas (lissage)
+FILTERED_GATE_X = 0.0
+FILTERED_GATE_Y = 0.0
+LAST_GATE_ID = None
+
 def determine_motor_mode(shared_data):
     global MOTOR_FRONT_LEFT, MOTOR_FRONT_RIGHT, MOTOR_BACK_LEFT, MOTOR_BACK_RIGHT
+    global ROLL_RATE, PITCH_RATE, YAW_RATE, THRUST
+    global FILTERED_GATE_X, FILTERED_GATE_Y
+    global LAST_GATE_ID
 
-    #On récupère les info
+    # --- RECUPERATION ET LISSAGE (FILTRE PASSE-BAS) ---
     gate_visible = shared_data.get('gate_visible', False)
-    gate_x = shared_data.get('gate_x', 0.0)
-    gate_y = shared_data.get('gate_y', 0.0)
-    gate_size = shared_data.get('gate_size', 0.0)  # Surface relative du trou (0.0 à 1.0)
+    raw_x = shared_data.get('gate_x', 0.0)
+    raw_y = shared_data.get('gate_y', 0.0)
+    gate_size = shared_data.get('gate_size', 0.0)
+    imu_gyro = shared_data.get('imu_gyro', (0.0, 0.0, 0.0))  # (roll_rate, pitch_rate, yaw_rate)
+    current_roll_rate = imu_gyro[0]
+    current_gate_id = shared_data.get('target_gate_idx', 0)
 
-    # --- PARAMÈTRES ---
-    ZONE_MORTE = 0.08       # Marge de tolérance au centre
-    GAZ_STATIONNAIRE = 0.265 # Puissance pour maintenir l'altitude (à ajuster selon ton drone)
-    KP_MONTER = 0.27        # Correction forte pour remonter rapidement
-    KP_DESCENDRE = 0.12     # Correction TRÈS DOUCE pour éviter de tomber
-    SAFETY_CEILING = 0.55   #Plafond de sécurité (ex: max X%)
-    SAFETY_FLOOR = 0.12     #Plancher de sécurité (ex: min X%)
+    # --- PARAMÈTRES RÉÉQUILIBRÉS ---
+    ZONE_MORTE_Y = 0.02     # Tolérance verticale
+    ZONE_MORTE_X = 0.15     # Tolérance horizontale
+    GAZ_STATIONNAIRE = 0.27 
+
+    # Gains P adoucis pour éliminer le yoyo
+    KP_MONTER = 0.20        # Diminué (était 0.30) pour éviter les bonds
+    KP_DESCENDRE = 0.15     
+    KP_DIRECTION = 0.01
+
+    SAFETY_CEILING = 0.38   # Plafond rabaissé à 38% (était 0.45)
+    SAFETY_FLOOR = 0.21     # Plancher de sécurité (20%)
+
+    # --- CHANGEMENT DE PORTE
+    if LAST_GATE_ID is not None and current_gate_id != LAST_GATE_ID:
+        LAST_GATE_ID = current_gate_id
+        # On remet le filtre à zéro pour éviter de traîner l'ancienne position (ex: gate_y négatif)
+        FILTERED_GATE_X, FILTERED_GATE_Y = 0.0, 0.0
+        
+        # On force la poussée au niveau neutre/léger freinage
+        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE
+        return f"MODE: SWITCH PORTE #{current_gate_id} 🎯 (Freinage inertie)"
+
+    LAST_GATE_ID = current_gate_id
+
 
     # 1. Mode Standby / Recherche : si aucune porte vue
     if not gate_visible:
+        FILTERED_GATE_X, FILTERED_GATE_Y = 0.0, 0.0
         MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE
+        ROLL_RATE = stabilize_drone(current_roll_rate)
         return "MODE: STANDBY / RECHERCHE 🔍"
 
-    # --- LOGIQUE DE CONTRÔLE VERTICAL ---
-    if gate_y < -ZONE_MORTE:
-        # La porte est en HAUT de l'image -> Le drone est TROP BAS -> Il doit MONTER
-        correction = KP_MONTER * abs(gate_y)
-        puissance = GAZ_STATIONNAIRE + correction
+    # Lissage sur la vision pour supprimer le bruit à 250 Hz (alpha = 0.15)
+    ALPHA = 0.15
+    FILTERED_GATE_X = (ALPHA * raw_x) + ((1 - ALPHA) * FILTERED_GATE_X)
+    FILTERED_GATE_Y = (ALPHA * raw_y) + ((1 - ALPHA) * FILTERED_GATE_Y)
 
-        # Plafond de sécurité
-        puissance = min(SAFETY_CEILING, puissance)
-        
-        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = puissance
-        MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = puissance
-        return f"MODE: MONTER ⬆️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} / gate_size : {gate_size:.2f}"
-
-    elif gate_y > ZONE_MORTE:
-        # La porte est en BAS de l'image -> Le drone est TROP HAUT -> Il doit DESCENDRE
-        correction = KP_DESCENDRE * abs(gate_y)
-        puissance = GAZ_STATIONNAIRE - correction
-
-        # Plancher de sécurité
-        puissance = max(SAFETY_FLOOR, puissance)
-        
-        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = puissance
-        MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = puissance
-        return f"MODE: DESCENDRE ⬇️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} / gate_size : {gate_size:.2f}"
-
-    else:
-        # La porte est centrée verticalement -> Maintien d'altitude / Avancer
-        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = GAZ_STATIONNAIRE
-        MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE
-        return f"FRANCHISSEMENT :: gaz stationnaire : {GAZ_STATIONNAIRE:.2f}  gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} / gate_size : {gate_size:.2f}"
-
-
-
-
-    # # --- FRANCHISSEMENT (BLIND DASH) ---
-    # # Si le trou occupe plus de 18% de l'image, la porte est tout près :
-    # # On fonce tout droit sans corriger X/Y car le cadre va sortir du champ de vision.
-    # if gate_size and gate_size > 0.18:
-    #     MOTOR_FRONT_LEFT = 0.28
-    #     MOTOR_FRONT_RIGHT = 0.28
-    #     MOTOR_BACK_LEFT = 0.28
-    #     MOTOR_BACK_RIGHT = 0.28
-    #     return f"FRANCHISSEMENT :: gate_x : {gate_x} / gate_y : {gate_y} / gate_size : {gate_size} "
-
-    # ZONE_MORTE = 0.06  # Légèrement réduite pour une meilleure précision
-
-    # # -------------------------------------------------------------
-    # # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y)
-    # # # Axe Y : +1.0 (Bas de l'image) , -1.0 (Haut de l'image)
-    # # -------------------------------------------------------------
-    # if gate_y < ZONE_MORTE:
-    #     MOTOR_FRONT_LEFT = 0.35
-    #     MOTOR_FRONT_RIGHT = 0.35
-    #     MOTOR_BACK_LEFT = 0.35
-    #     MOTOR_BACK_RIGHT = 0.35
-    #     return "MODE: MONTER ⬆️"
-
-    # elif gate_y > ZONE_MORTE:
-    #     MOTOR_FRONT_LEFT = 0.22
-    #     MOTOR_FRONT_RIGHT = 0.22
-    #     MOTOR_BACK_LEFT = 0.22
-    #     MOTOR_BACK_RIGHT = 0.22
-    #     return "MODE: DESCENDRE ⬇️"
+    gate_x = FILTERED_GATE_X
+    gate_y = FILTERED_GATE_Y
 
     # -------------------------------------------------------------
-    # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
-    # gate_x > 0 signifie que la porte est à DROITE -> PIVOT DROITE
+    # LOGIQUE DE CONTRÔLE
     # -------------------------------------------------------------
-    # if gate_x > ZONE_MORTE:
-    #     # Différentiel pour pivoter à droite (moteurs gauches plus forts)
-    #     MOTOR_FRONT_LEFT = 0.32
-    #     MOTOR_FRONT_RIGHT = 0.24
-    #     MOTOR_BACK_LEFT = 0.32
-    #     MOTOR_BACK_RIGHT = 0.24
-    #     return "MODE: DROITE ➡️"
 
-    # elif gate_x < -ZONE_MORTE:
-    #     # Différentiel pour pivoter à gauche (moteurs droits plus forts)
-    #     MOTOR_FRONT_LEFT = 0.24
-    #     MOTOR_FRONT_RIGHT = 0.32
-    #     MOTOR_BACK_LEFT = 0.24
-    #     MOTOR_BACK_RIGHT = 0.32
-    #     return "MODE: GAUCHE ⬅️"
+    # A. Drone TROP BAS -> MONTER
+    if gate_y < -ZONE_MORTE_Y:
+        puissance = min(SAFETY_CEILING, GAZ_STATIONNAIRE + (KP_MONTER * abs(gate_y)))
 
-    # # -------------------------------------------------------------
-    # # ALIGNÉ : AVANCE VERS LA PORTE
-    # # Vitesse d'avance ajustée dynamiquement selon la distance
-    # # -------------------------------------------------------------
-    # if gate_size and gate_size < 0.05:
-    #     # Porte loin : on avance un peu plus fort
-    #     base_speed = 0.35
-    # else:
-    #     # Porte proche : approche prudente
-    #     base_speed = 0.28
+        if gate_x > ZONE_MORTE_X:
+            MOTOR_FRONT_LEFT = MOTOR_BACK_LEFT = puissance + KP_DIRECTION
+            MOTOR_FRONT_RIGHT = MOTOR_BACK_RIGHT = puissance - KP_DIRECTION
+            return f"MODE: MONTER/DROITE ⬆️➡️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
+        elif gate_x < -ZONE_MORTE_X:
+            MOTOR_FRONT_LEFT = MOTOR_BACK_LEFT = puissance - KP_DIRECTION
+            MOTOR_FRONT_RIGHT = MOTOR_BACK_RIGHT = puissance + KP_DIRECTION
+            return f"MODE: MONTER/GAUCHE ⬆️⬅️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
 
-    # MOTOR_FRONT_LEFT = base_speed
-    # MOTOR_FRONT_RIGHT = base_speed
-    # MOTOR_BACK_LEFT = base_speed
-    # MOTOR_BACK_RIGHT = base_speed
+        ROLL_RATE = stabilize_drone(current_roll_rate)
+        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = puissance
+        return f"MODE: MONTER ⬆️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
 
-    # return "MODE: AVANCE CENTRÉE 🚪"
-# def determine_motor_mode(shared_data):
-#     global MOTOR_FRONT_LEFT, MOTOR_FRONT_RIGHT, MOTOR_BACK_LEFT, MOTOR_BACK_RIGHT
+    # B. Drone TROP HAUT -> DESCENDRE
+    elif gate_y > ZONE_MORTE_Y:
+        # Descente dosée mais plus réactive quand la porte est très bas (> 0.50)
+        facteur_descente = 0.20 if gate_y > 0.40 else KP_DESCENDRE
+        # puissance = max(SAFETY_FLOOR, GAZ_STATIONNAIRE - (KP_DESCENDRE * abs(gate_y)))
+        puissance = max(SAFETY_FLOOR, GAZ_STATIONNAIRE - (facteur_descente * abs(gate_y)))
 
-#     # 1. Mode par défaut : Si pas de porte, on avance lentement
-#     if not shared_data.get('gate_visible', False):
-#         MOTOR_FRONT_LEFT = 0.28
-#         MOTOR_FRONT_RIGHT = 0.28
-#         MOTOR_BACK_LEFT = 0.28
-#         MOTOR_BACK_RIGHT = 0.28
-#     #TODO : trouver les bons para pour garder le drone droit tout en allant vers l'avant
-#         return "MODE: STAND BY"#TODO : desactiver log quand la course pas encore lancé
+        if gate_x > ZONE_MORTE_X:
+            MOTOR_FRONT_LEFT = MOTOR_BACK_LEFT = puissance + KP_DIRECTION
+            MOTOR_FRONT_RIGHT = MOTOR_BACK_RIGHT = puissance - KP_DIRECTION
+            return f"MODE: DESCENDRE/DROITE ⬇️➡️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
+        elif gate_x < -ZONE_MORTE_X:
+            MOTOR_FRONT_LEFT = MOTOR_BACK_LEFT = puissance - KP_DIRECTION
+            MOTOR_FRONT_RIGHT = MOTOR_BACK_RIGHT = puissance + KP_DIRECTION
+            return f"MODE: DESCENDRE/GAUCHE ⬇️⬅️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
 
-#     gate_x = shared_data.get('gate_x', 0.0)
-#     gate_y = shared_data.get('gate_y', 0.0)
+        ROLL_RATE = stabilize_drone(current_roll_rate)
+        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = puissance
+        return f"MODE: DESCENDRE ⬇️ :: puissance : {puissance:.2f} :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
 
-#     ZONE_MORTE = 0.1
-
-#     # -------------------------------------------------------------
-#     # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y)
-#     # -------------------------------------------------------------
-
-#     if gate_y > ZONE_MORTE:
-#         MOTOR_FRONT_LEFT = 0.65
-#         MOTOR_FRONT_RIGHT = 0.65
-#         MOTOR_BACK_LEFT = 0.65
-#         MOTOR_BACK_RIGHT = 0.65
-#         return "MODE: MONTER ⬆️"
-
-    
-#     elif gate_y < -ZONE_MORTE:
-#         MOTOR_FRONT_LEFT = 0.25
-#         MOTOR_FRONT_RIGHT = 0.25
-#         MOTOR_BACK_LEFT = 0.25
-#         MOTOR_BACK_RIGHT = 0.25
-    
-#         return "MODE: DESCENDRE ⬇️"
-    
-    
-        
-#     # # -------------------------------------------------------------
-#     # # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
-#     # # Si gate_x > ZONE_MORTE, la porte est à DROITE -> Tourner à droite
-#     # # -------------------------------------------------------------
-
-#     if gate_x > ZONE_MORTE:
-#         # DROITE (Yaw à droite) : Moteurs Gauches poussent plus, Moteurs Droits poussent moins
-#         MOTOR_FRONT_LEFT = 0.30
-#         MOTOR_FRONT_RIGHT = 0.25
-#         MOTOR_BACK_LEFT = 0.30
-#         MOTOR_BACK_RIGHT = 0.25
-
-#         return "MODE: DROITE ➡️"
-        
-#     elif gate_x < -ZONE_MORTE:
-#         # GAUCHE (Yaw à gauche) : Moteurs Droits poussent plus, Moteurs Gauches poussent moins
-#         MOTOR_FRONT_LEFT = 0.25
-#         MOTOR_FRONT_RIGHT = 0.30
-#         MOTOR_BACK_LEFT = 0.25
-#         MOTOR_BACK_RIGHT = 0.30
-
-#         return "MODE: GAUCHE ⬅️"
-
-#     # MOTOR_FRONT_LEFT = 0.2799999
-#     # MOTOR_FRONT_RIGHT = 0.2799999
-#     # MOTOR_BACK_LEFT = 0.28
-#     # MOTOR_BACK_RIGHT = 0.28
-#     MOTOR_FRONT_LEFT = 0.28
-#     MOTOR_FRONT_RIGHT = 0.28
-#     MOTOR_BACK_LEFT = 0.28
-#     MOTOR_BACK_RIGHT = 0.28
-
-#     return "MODE: AVANCE LENTE (vers porte) 🚪"
-
-
-        # MOTOR_FRONT_LEFT = 0
-        # MOTOR_FRONT_RIGHT = 0
-        # MOTOR_BACK_LEFT = 0
-        # MOTOR_BACK_RIGHT = 0
-        # return "MODE: STATIONNEMENT"
-
-
-# def decide_drone_movement(shared_data):
-    # On déclare qu'on va modifier les constantes globales en haut du script
-    global PITCH_RATE, ROLL_RATE, YAW_RATE, THRUST
-
-    gate_x = shared_data.get('gate_x', 0.0)
-    gate_y = shared_data.get('gate_y', 0.0)
-    gate_visible = shared_data.get('gate_visible', False)
-    
-    # Réinitialisation par défaut (Vol stationnaire)
-    PITCH_RATE = 0.0
-    ROLL_RATE  = 0.0
-    YAW_RATE   = 0.0
-    THRUST     = THRUST_HOVER
-    
-    mode = "MODE: RECHERCHE"
-
-    if gate_visible:
-        # -------------------------------------------------------------
-        # PRIORITÉ 1 : MONTER / DESCENDRE (Axe Y en OpenCV)
-        # -------------------------------------------------------------
-        if gate_y > ZONE_MORTE:
-            THRUST = THRUST_HOVER - 0.12  # On baisse les gaz pour descendre
-            mode = "MODE: DESCENDRE"
-            
-        elif gate_y < -ZONE_MORTE:
-            THRUST = THRUST_HOVER + 0.15  # On pousse les gaz pour monter
-            mode = "MODE: MONTER"
-            
-        # -------------------------------------------------------------
-        # PRIORITÉ 2 : GAUCHE / DROITE (Axe X)
-        # -------------------------------------------------------------
-        elif gate_x > ZONE_MORTE:
-            YAW_RATE = 0.4   # Rotation vers la droite (rad/s)
-            mode = "MODE: DROITE"
-            
-        elif gate_x < -ZONE_MORTE:
-            YAW_RATE = -0.4  # Rotation vers la gauche (rad/s)
-            mode = "MODE: GAUCHE"
-            
-        # -------------------------------------------------------------
-        # PRIORITÉ 3 : ALIGNÉ -> AVANCER
-        # -------------------------------------------------------------
-        else:
-            PITCH_RATE = -0.3  # Négatif = pitch forward pour avancer
-            THRUST = THRUST_HOVER + 0.05 # Léger filet de gaz pour compenser la translation
-            mode = "MODE: AVANCE VERS LA PORTE"
-            
+    # C. Drone aligné en Y -> Ajustement X OU Franchissement
     else:
-        # Mode recherche si la porte est perdue de vue
-        YAW_RATE = 0.3
-        THRUST = THRUST_HOVER
-        mode = "MODE: RECHERCHE PORTE (Rotation)"
+        # Si aligné verticalement mais PAS horizontalement
+        if gate_x > ZONE_MORTE_X:
+            MOTOR_FRONT_LEFT = MOTOR_BACK_LEFT = GAZ_STATIONNAIRE + KP_DIRECTION
+            MOTOR_FRONT_RIGHT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE - KP_DIRECTION
+            return f"MODE: AJUSTEMENT DROITE ➡️ :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
+        elif gate_x < -ZONE_MORTE_X:
+            MOTOR_FRONT_LEFT = MOTOR_BACK_LEFT = GAZ_STATIONNAIRE - KP_DIRECTION
+            MOTOR_FRONT_RIGHT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE + KP_DIRECTION
+            return f"MODE: AJUSTEMENT GAUCHE ⬅️ :: gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} // roll_rate : {current_roll_rate:.2f}"
 
-    # --- SÉCURISATION DES PLAGES ---
-    THRUST = max(0.0, min(1.0, THRUST))
-    PITCH_RATE = max(-1.0, min(1.0, PITCH_RATE))
-    YAW_RATE = max(-1.0, min(1.0, YAW_RATE))
+        # Aligné en X ET en Y -> VRAI FRANCHISSEMENT
+        ROLL_RATE = stabilize_drone(current_roll_rate)
+        MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE
+        return f"FRANCHISSEMENT :: gaz : {GAZ_STATIONNAIRE:.2f} | gate_x : {gate_x:.2f} / gate_y : {gate_y:.2f} / size : {gate_size:.2f} // roll_rate : {current_roll_rate:.2f}"
 
-    return mode
+
+def stabilize_drone(current_roll_rate):
+    """
+    Stabilise le drone à plat (Roll/Pitch/Yaw à 0) 
+    avec une poussée stationnaire.
+    """
+    # Gain de freinage pour annuler l'inertie
+    K_D = 0.20
+    # Consignes nulles + freinage actif basé sur le gyro
+    final_roll_rate  = 0.0 - (K_D * current_roll_rate)
+    return final_roll_rate
+
+
 # --------------------------------------------------------------------------------------
 # Control Loop
 # --------------------------------------------------------------------------------------
@@ -485,39 +275,33 @@ class Controller:
         self.data = data
         self.system_boot_ms = system_boot_ms
 
-        self.frame_counter = 0
+        # self.frame_counter = 0
 
         
 
 
     def update(self):
-        self.frame_counter += 1
+        # self.frame_counter += 1
 
         # 1. Récupération de l'état de la course depuis shared_data
         race_started = self.data.get('race_started', False)
 
         if not race_started:
             # Compte à rebours/attente
-            # logger.info("[LOG] Attente du départ... Moteurs coupés (0%)")
             pass
         else:
-            # ROLL_RATE, PITCH_RATE, YAW_RATE, THRUST = decide_drone_movement(self.data)
-            # à remettre
-
 
             # send automated targets to sim flight controller
-            # update_attitude_flight_control(self.sim_conn, self.system_boot_ms)
+            update_attitude_flight_control(self.sim_conn, self.system_boot_ms)
             # alternatively one of
             # update_position_flight_control(self.sim_conn, self.system_boot_ms)
             update_motor_control(self.sim_conn, self.system_boot_ms)
-            
             info_control = determine_motor_mode(self.data)
-            # mode_actuel = decide_drone_movement(self.data)
-            if info_control != "MODE: STANDBY / RECHERCHE 🔍" and self.frame_counter % 50 == 0:
-                logger.info(f"{info_control}")
-                self.frame_counter = 0
-            # logger.info(f"[LOG] Moteurs -> AV_G: {MOTOR_FRONT_LEFT:.4f} | AV_D: {MOTOR_FRONT_RIGHT:.4f} | AR_G: {MOTOR_BACK_LEFT:.4f} | AR_D: {MOTOR_BACK_RIGHT:.4f}")
 
+            if info_control != "MODE: STANDBY / RECHERCHE 🔍" : #and self.frame_counter % 50 == 0
+                logger.info(f"{info_control}")
+                #self.frame_counter = 0
+            
         time.sleep(1.0 / CONTROL_HZ)
 
     # -------------------------------
