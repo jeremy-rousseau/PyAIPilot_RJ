@@ -76,56 +76,56 @@ def update_attitude_flight_control(mavlink_conn, system_boot_ms):
 # --------------------------------------------------------------------------------------
 # POSITION CONTROLS
 # --------------------------------------------------------------------------------------
-# VELOCITY_POSITION_MASK = (
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE |
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE |
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE |
+VELOCITY_POSITION_MASK = (
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE |
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE |
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE |
 
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE |
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE |
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE |
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE |
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
 
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
-#         mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
-# )
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+)
 
-# def update_position_flight_control(mavlink_conn, system_boot_ms):
-    # now_ms = int(time.time() * 1000)
+def update_position_flight_control(mavlink_conn, system_boot_ms):
+    now_ms = int(time.time() * 1000)
 
-    # """
-    # Sets a desired vehicle position in a local north-east-down coordinate
-    # frame. Used by an external controller to command the vehicle
-    # (manual controller or other system).
+    """
+    Sets a desired vehicle position in a local north-east-down coordinate
+    frame. Used by an external controller to command the vehicle
+    (manual controller or other system).
 
-    # time_boot_ms              : Timestamp (time since system boot). [ms] (type:uint32_t)
-    # target_system             : System ID (type:uint8_t)
-    # target_component          : Component ID (type:uint8_t)
-    # coordinate_frame          : Valid options are: MAV_FRAME_LOCAL_NED = 1, MAV_FRAME_LOCAL_OFFSET_NED = 7, MAV_FRAME_BODY_NED = 8, MAV_FRAME_BODY_OFFSET_NED = 9 (type:uint8_t, values:MAV_FRAME)
-    # type_mask                 : Bitmap to indicate which dimensions should be ignored by the vehicle. (type:uint16_t, values:POSITION_TARGET_TYPEMASK)
-    # x                         : X Position in NED frame [m] (type:float)
-    # y                         : Y Position in NED frame [m] (type:float)
-    # z                         : Z Position in NED frame (note, altitude is negative in NED) [m] (type:float)
-    # vx                        : X velocity in NED frame [m/s] (type:float)
-    # vy                        : Y velocity in NED frame [m/s] (type:float)
-    # vz                        : Z velocity in NED frame [m/s] (type:float)
-    # afx                       : X acceleration or force (if bit 10 of type_mask is set) in NED frame in meter / s^2 or N [m/s/s] (type:float)
-    # afy                       : Y acceleration or force (if bit 10 of type_mask is set) in NED frame in meter / s^2 or N [m/s/s] (type:float)
-    # afz                       : Z acceleration or force (if bit 10 of type_mask is set) in NED frame in meter / s^2 or N [m/s/s] (type:float)
-    # yaw                       : yaw setpoint [rad] (type:float)
-    # yaw_rate                  : yaw rate setpoint [rad/s] (type:float)
-    # """
-    # mavlink_conn.mav.set_position_target_local_ned_send(
-    #     now_ms - system_boot_ms,
-    #     mavlink_conn.target_system,
-    #     mavlink_conn.target_component,
-    #     mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-    #     VELOCITY_POSITION_MASK,
-    #     0.0, 0, 0.0,    # ignored position NED
-    #     2.0, 0.0, 0.0,  # Vel - 2 m/s forward
-    #     0.0, 0, 0.0,    # ignored acceleration
-    #     0,              # ignored yaw
-    #     0.0             # ignored yaw rate
-    # )
+    time_boot_ms              : Timestamp (time since system boot). [ms] (type:uint32_t)
+    target_system             : System ID (type:uint8_t)
+    target_component          : Component ID (type:uint8_t)
+    coordinate_frame          : Valid options are: MAV_FRAME_LOCAL_NED = 1, MAV_FRAME_LOCAL_OFFSET_NED = 7, MAV_FRAME_BODY_NED = 8, MAV_FRAME_BODY_OFFSET_NED = 9 (type:uint8_t, values:MAV_FRAME)
+    type_mask                 : Bitmap to indicate which dimensions should be ignored by the vehicle. (type:uint16_t, values:POSITION_TARGET_TYPEMASK)
+    x                         : X Position in NED frame [m] (type:float)
+    y                         : Y Position in NED frame [m] (type:float)
+    z                         : Z Position in NED frame (note, altitude is negative in NED) [m] (type:float)
+    vx                        : X velocity in NED frame [m/s] (type:float)
+    vy                        : Y velocity in NED frame [m/s] (type:float)
+    vz                        : Z velocity in NED frame [m/s] (type:float)
+    afx                       : X acceleration or force (if bit 10 of type_mask is set) in NED frame in meter / s^2 or N [m/s/s] (type:float)
+    afy                       : Y acceleration or force (if bit 10 of type_mask is set) in NED frame in meter / s^2 or N [m/s/s] (type:float)
+    afz                       : Z acceleration or force (if bit 10 of type_mask is set) in NED frame in meter / s^2 or N [m/s/s] (type:float)
+    yaw                       : yaw setpoint [rad] (type:float)
+    yaw_rate                  : yaw rate setpoint [rad/s] (type:float)
+    """
+    mavlink_conn.mav.set_position_target_local_ned_send(
+        now_ms - system_boot_ms,
+        mavlink_conn.target_system,
+        mavlink_conn.target_component,
+        mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+        VELOCITY_POSITION_MASK,
+        0.0, 0, 0.0,    # ignored position NED
+        2.0, 0.0, 0.0,  # Vel - 2 m/s forward
+        0.0, 0, 0.0,    # ignored acceleration
+        0,              # ignored yaw
+        0.0             # ignored yaw rate
+    )
 
 # --------------------------------------------------------------------------------------
 # MOTOR MODE CONTROLS
@@ -141,7 +141,7 @@ def determine_motor_mode(shared_data):
     global FILTERED_GATE_X, FILTERED_GATE_Y
     global LAST_GATE_ID
 
-    # --- RECUPERATION ET LISSAGE (FILTRE PASSE-BAS) ---
+    # --- RECUPERATION ET LISSAGE ---
     gate_visible = shared_data.get('gate_visible', False)
     raw_x = shared_data.get('gate_x', 0.0)
     raw_y = shared_data.get('gate_y', 0.0)
@@ -155,21 +155,21 @@ def determine_motor_mode(shared_data):
     ZONE_MORTE_X = 0.15     # Tolérance horizontale
     GAZ_STATIONNAIRE = 0.27 
 
-    # Gains P adoucis pour éliminer le yoyo
-    KP_MONTER = 0.20        # Diminué (était 0.30) pour éviter les bonds
+    # Gains
+    KP_MONTER = 0.20       
     KP_DESCENDRE = 0.15     
     KP_DIRECTION = 0.01
 
-    SAFETY_CEILING = 0.38   # Plafond rabaissé à 38% (était 0.45)
-    SAFETY_FLOOR = 0.21     # Plancher de sécurité (20%)
+    SAFETY_CEILING = 0.38   # Plafond de sécurité
+    SAFETY_FLOOR = 0.21     # Plancher de sécurité
 
     # --- CHANGEMENT DE PORTE
     if LAST_GATE_ID is not None and current_gate_id != LAST_GATE_ID:
         LAST_GATE_ID = current_gate_id
-        # On remet le filtre à zéro pour éviter de traîner l'ancienne position (ex: gate_y négatif)
+        # On remet le filtre à zéro
         FILTERED_GATE_X, FILTERED_GATE_Y = 0.0, 0.0
         
-        # On force la poussée au niveau neutre/léger freinage
+        # On force la poussée au niveau neutre
         MOTOR_FRONT_LEFT = MOTOR_FRONT_RIGHT = MOTOR_BACK_LEFT = MOTOR_BACK_RIGHT = GAZ_STATIONNAIRE
         return f"MODE: SWITCH PORTE #{current_gate_id} 🎯 (Freinage inertie)"
 
@@ -183,7 +183,7 @@ def determine_motor_mode(shared_data):
         ROLL_RATE = stabilize_drone(current_roll_rate)
         return "MODE: STANDBY / RECHERCHE 🔍"
 
-    # Lissage sur la vision pour supprimer le bruit à 250 Hz (alpha = 0.15)
+    # Lissage sur la vision
     ALPHA = 0.15
     FILTERED_GATE_X = (ALPHA * raw_x) + ((1 - ALPHA) * FILTERED_GATE_X)
     FILTERED_GATE_Y = (ALPHA * raw_y) + ((1 - ALPHA) * FILTERED_GATE_Y)
@@ -214,9 +214,8 @@ def determine_motor_mode(shared_data):
 
     # B. Drone TROP HAUT -> DESCENDRE
     elif gate_y > ZONE_MORTE_Y:
-        # Descente dosée mais plus réactive quand la porte est très bas (> 0.50)
+        # Descente dosée mais plus réactive quand la porte est très bas
         facteur_descente = 0.20 if gate_y > 0.40 else KP_DESCENDRE
-        # puissance = max(SAFETY_FLOOR, GAZ_STATIONNAIRE - (KP_DESCENDRE * abs(gate_y)))
         puissance = max(SAFETY_FLOOR, GAZ_STATIONNAIRE - (facteur_descente * abs(gate_y)))
 
         if gate_x > ZONE_MORTE_X:
@@ -281,9 +280,8 @@ class Controller:
 
 
     def update(self):
-        # self.frame_counter += 1
 
-        # 1. Récupération de l'état de la course depuis shared_data
+        # Récupération de l'état de la course depuis shared_data
         race_started = self.data.get('race_started', False)
 
         if not race_started:
@@ -298,9 +296,9 @@ class Controller:
             update_motor_control(self.sim_conn, self.system_boot_ms)
             info_control = determine_motor_mode(self.data)
 
-            if info_control != "MODE: STANDBY / RECHERCHE 🔍" : #and self.frame_counter % 50 == 0
+            if info_control != "MODE: STANDBY / RECHERCHE 🔍" : 
                 logger.info(f"{info_control}")
-                #self.frame_counter = 0
+
             
         time.sleep(1.0 / CONTROL_HZ)
 

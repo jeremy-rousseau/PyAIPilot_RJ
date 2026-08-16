@@ -16,7 +16,7 @@ os.makedirs('log', exist_ok=True)
 
 logging.basicConfig(
     filename='log/flight_log.txt',
-    filemode='w',  # 'w' pour écraser le fichier à chaque nouveau lancement
+    filemode='w',
     format='%(asctime)s [%(levelname)s] %(message)s',
     encoding='utf8',
     datefmt='%H:%M:%S',
@@ -59,7 +59,7 @@ except KeyboardInterrupt:
     # exit
     vision_rx.get_thread_for_join().join(timeout=1.0)
     mavlink_rx.get_thread_for_join().join(timeout=1.0)
-    ts_loop.get_thread_for_join().join(timeout=1.0)#TODO problème à régler NoneType has no attribute
+    ts_loop.get_thread_for_join().join(timeout=1.0)
     
     
 finally :

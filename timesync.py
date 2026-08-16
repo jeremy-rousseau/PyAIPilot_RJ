@@ -20,6 +20,7 @@ class TimeSync:
             target=ts.timesync_loop,
             daemon = True
             #Pour éviter problème, lors de la fin du process
+            #Par défaut :
             # daemon = False
             
         )

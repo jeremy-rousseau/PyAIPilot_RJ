@@ -227,10 +227,10 @@ class MAVLinkRX:
             has_started = valid_start_time and (sim_boot_time_ms >= race_start_boot_time_ms)
             has_finished = race_finish_time_ns is not None and race_finish_time_ns > 0
 
-            # 2. Mise à jour de shared_data pour que ton contrôleur y ait accès
+            # 3. Mise à jour de shared_data pour que ton contrôleur y ait accès
             self.data['race_started'] = has_started
             self.data['race_finished'] = has_finished
-            self.data['target_gate_idx'] = active_gate_index  # Index de la porte cible actuelle !
+            self.data['target_gate_idx'] = active_gate_index
             self.data['last_gate_time'] = last_gate_race_time / 1e9 if last_gate_race_time > 0 else 0.0
 
             # Log informatif
@@ -283,20 +283,12 @@ class MAVLinkRX:
         motor_back_left = msg.actuator[2]
         motor_back_right = msg.actuator[3]
 
-        # --- ON ENVOIE LES DONNÉES DANS LA MÉMOIRE PARTAGÉE ---
-        # On utilise des clés explicites pour que ce soit facile à lire dans le contrôleur
         self.data['moteurs'] = [
             motor_front_left, 
             motor_front_right, 
             motor_back_left, 
             motor_back_right
         ]
-        #Si ce sont des nombres décimaux entre 0.0 et 1.0 : 1.0 veut dire moteur à fond.
-        # PWM classique.
-        # Autour de 1000 : Le moteur est coupé ou tourne au ralenti minimum (pas de poussée).
-        # Autour de 1500 : Le moteur tourne à mi-puissance (proche du vol stationnaire).
-        # Autour de 2000 : Le moteur est à fond absolu (100% de sa puissance).
-
 
     def on_collision(self, msg):
         # Collision IDs
